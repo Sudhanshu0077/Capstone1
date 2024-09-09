@@ -1,0 +1,66 @@
+import json
+import boto3
+import tensorflow as tf
+import sagemaker
+from sagemaker import get_execution_role
+from sagemaker.model import Model
+from tensorflow.keras.preprocessing import image
+import numpy as np
+import os
+
+# Initialize AWS services
+s3 = boto3.client('s3')
+
+# Load the model from S3
+def load_model():
+    bucket = 'cappproject'
+    key = 'fire_detection_model.keras/model.tar.gz'
+    local_path = '/tmp/model.tar.gz'
+    
+    # Download the model tar.gz file
+    s3.download_file(bucket, key, local_path)
+    
+    # Extract the tar.gz file
+    import tarfile
+    with tarfile.open(local_path, 'r:gz') as tar:
+        tar.extractall(path='/tmp')
+    
+    # Load the model
+    model = tf.keras.models.load_model('/tmp/model')
+    return model
+
+def predict(event, context):
+    try:
+        # Assume the event contains an S3 path to the image
+        bucket = event['bucket']
+        key = event['key']
+
+        # Download the image from S3
+        image_path = '/tmp/image.jpg'
+        s3.download_file(bucket, key, image_path)
+        
+        # Preprocess the image
+        img = image.load_img(image_path, target_size=(64, 64))
+        img = image.img_to_array(img)
+        img = np.expand_dims(img, axis=0)
+        img = img / 255.0
+        
+        # Load the model and make a prediction
+        model = load_model()
+        prediction = model.predict(img)
+        
+        # Return the result
+        return {
+            'statusCode': 200,
+            'body': json.dumps({
+                'prediction': str(np.argmax(prediction))
+            })
+        }
+    except Exception as e:
+        print(f"Error during prediction: {e}")
+        return {
+            'statusCode': 500,
+            'body': json.dumps({
+                'error': str(e)
+            })
+        }
